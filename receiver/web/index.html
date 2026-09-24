@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mavic Telemetry</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --bg: #0e1116; --panel: #171b22; --panel2: #1e232c; --line: #2a303b;
+    --text: #e6e9ef; --muted: #8b93a1; --accent: #38bdf8;
+    --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+    --sky: #2b6cb0; --ground: #7c5a2e;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 10px 16px;
+           background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 99px;
+          background: var(--panel2); border: 1px solid var(--line); font-weight: 600; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .live .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .stale .dot { background: var(--warn); }
+  .off .dot { background: var(--bad); }
+  .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .meta b { color: var(--text); font-weight: 600; }
+  .spacer { flex: 1; }
+
+  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(340px, 2fr); gap: 12px;
+         padding: 12px; flex: 1; min-height: 0; }
+  .mapwrap { position: relative; min-height: 380px; border-radius: 10px; overflow: hidden;
+             border: 1px solid var(--line); }
+  #map { position: absolute; inset: 0; background: #222; }
+  .maptools { position: absolute; z-index: 1000; left: 10px; bottom: 10px; display: flex; flex-wrap: wrap;
+              gap: 8px; align-items: center; padding: 6px 10px; border-radius: 8px;
+              background: rgba(23, 27, 34, .9); border: 1px solid var(--line); }
+  .maptools label { display: flex; gap: 5px; align-items: center; cursor: pointer; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+           padding: 4px 10px; cursor: pointer; font: inherit; }
+  button:hover { border-color: var(--accent); }
+  #coords { font-variant-numeric: tabular-nums; color: var(--muted); }
+
+  .side { overflow: auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding-right: 2px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .card h2 { margin: 0 0 8px; font-size: 12px; font-weight: 650; letter-spacing: .06em;
+             text-transform: uppercase; color: var(--muted); }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; min-width: 0; }
+  .tile .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .tile .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tile .u { font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 2px; }
+  .tile .s { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; justify-content: space-around; }
+  .row > div { text-align: center; color: var(--muted); font-size: 12px; }
+  canvas { display: block; margin: 0 auto 4px; }
+
+  .bar { height: 10px; background: var(--panel2); border-radius: 6px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+  .kv { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 10px; align-items: center; margin-top: 6px; }
+  .kv span:first-child { color: var(--muted); }
+  .kv span:last-child { font-variant-numeric: tabular-nums; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 2px 9px; border-radius: 99px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+  .chip.on { color: #111; background: var(--warn); border-color: var(--warn); font-weight: 600; }
+  .chip.bad { color: #111; background: var(--bad); border-color: var(--bad); font-weight: 600; }
+  .chip.good { color: #06281c; background: var(--ok); border-color: var(--ok); font-weight: 600; }
+  .sticks { display: flex; gap: 18px; justify-content: center; }
+  .pad { position: relative; width: 84px; height: 84px; border: 1px solid var(--line); border-radius: 8px;
+         background: var(--panel2); }
+  .pad::before, .pad::after { content: ""; position: absolute; background: var(--line); }
+  .pad::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+  .pad::after { top: 50%; left: 0; right: 0; height: 1px; }
+  .pad i { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--accent);
+           left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  .charts canvas { width: 100%; height: 76px; margin: 0 0 8px; }
+  details summary { cursor: pointer; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  td { padding: 2px 6px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  td:first-child { color: var(--muted); }
+
+  .drone { transition: transform .15s linear; }
+  .home-ic { background: var(--ok); color: #06281c; font-weight: 800; width: 22px; height: 22px; border-radius: 50%;
+             display: grid; place-items: center; border: 2px solid #fff; font-size: 12px; }
+
+  .replay .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: var(--panel2); padding: 4px 14px; }
+  .seg button.active { background: var(--accent); color: #06212e; font-weight: 700; }
+  .replaybar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 8px 16px;
+               background: var(--panel2); border-bottom: 1px solid var(--line); }
+  .replaybar select { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+                      border-radius: 6px; padding: 4px 8px; font: inherit; max-width: 260px; }
+  .replaybar input[type=range] { flex: 1; min-width: 180px; accent-color: var(--accent); }
+  .replaybar .play { width: 40px; font-size: 16px; }
+  #tcur { font-variant-numeric: tabular-nums; min-width: 92px; display: inline-block; }
+  .charts canvas { cursor: default; }
+  .replay-on .charts canvas { cursor: pointer; }
+
+  @media (max-width: 900px) {
+    body { height: auto; }
+    main { grid-template-columns: 1fr; height: auto; }
+    .mapwrap { height: 55vh; }
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .side { overflow: visible; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🚁 Mavic Telemetry</h1>
+  <span id="status" class="pill off"><span class="dot"></span><span id="statusTxt">Conectando…</span></span>
+  <span class="meta">Pacotes <b id="cnt">0</b></span>
+  <span class="meta">Perdidos <b id="lost">0</b></span>
+  <span class="meta">Taxa <b id="rate">--</b> Hz</span>
+  <span class="seg"><button id="modeLive" class="active">Ao vivo</button><button id="modeReplay">Replay</button></span>
+  <span class="spacer"></span>
+  <span class="meta">Hora do drone/celular <b id="clock">--:--:--</b></span>
+</header>
+
+<div class="replaybar" id="replaybar" hidden>
+  <select id="logSel" title="Logs salvos na pasta de logs do receptor"></select>
+  <button id="openBtn" title="Abrir um .csv ou .jsonl do computador (ou arraste para a página)">Abrir arquivo…</button>
+  <input type="file" id="fileIn" accept=".csv,.jsonl,.json" hidden>
+  <button id="stepBack" title="Voltar 5 s (←)">⏪</button>
+  <button id="play" class="play" title="Reproduzir/pausar (espaço)">▶</button>
+  <button id="stepFwd" title="Avançar 5 s (→)">⏩</button>
+  <input type="range" id="seek" min="0" max="10000" value="0" disabled>
+  <b id="tcur">0:00 / 0:00</b>
+  <select id="speed" title="Velocidade de reprodução">
+    <option value="0.5">0,5×</option><option value="1" selected>1×</option><option value="2">2×</option>
+    <option value="5">5×</option><option value="10">10×</option><option value="30">30×</option>
+  </select>
+</div>
+
+<main>
+  <section class="mapwrap">
+    <div id="map"></div>
+    <div class="maptools">
+      <label><input type="checkbox" id="follow" checked> Seguir drone</label>
+      <button id="center">Centralizar</button>
+      <button id="clear">Limpar trilha</button>
+      <span id="coords">sem posição GPS</span>
+    </div>
+  </section>
+
+  <section class="side">
+    <div class="tiles">
+      <div class="tile"><div class="k">Altitude</div><div class="v"><span id="alt">--</span><span class="u">m</span></div><div class="s" id="altSub">&nbsp;</div></div>
+      <div class="tile"><div class="k">Vel. horiz.</div><div class="v"><span id="spd">--</span><span class="u">m/s</span></div><div class="s" id="spdSub">&nbsp;</div></div>
+      <div class="tile"><div class="k">Vel. vert.</div><div class="v"><span id="vz">--</span><span class="u">m/s</span></div><div class="s" id="vzSub">&nbsp;</div></div>
+      <div class="tile"><div class="k">Dist. home</div><div class="v"><span id="dist">--</span><span class="u">m</span></div><div class="s" id="distSub">&nbsp;</div></div>
+      <div class="tile"><div class="k">Bateria</div><div class="v"><span id="batTile">--</span><span class="u">%</span></div><div class="s" id="batSub">&nbsp;</div></div>
+      <div class="tile"><div class="k">Satélites</div><div class="v" id="sats">--</div><div class="s" id="gps">&nbsp;</div></div>
+      <div class="tile"><div class="k">Tempo de voo</div><div class="v" id="ftime">--</div><div class="s" id="fremain">&nbsp;</div></div>
+      <div class="tile"><div class="k">Modo</div><div class="v" id="mode" style="font-size:16px">--</div><div class="s" id="flying">&nbsp;</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Atitude e rumo</h2>
+      <div class="row">
+        <div><canvas id="horizon"></canvas>Pitch <b id="pitchTxt">--</b>° · Roll <b id="rollTxt">--</b>°</div>
+        <div><canvas id="compass"></canvas>Rumo <b id="yawTxt">--</b>°</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Bateria</h2>
+      <div class="bar"><i id="batBar"></i></div>
+      <div class="kv" id="batKv"></div>
+      <div class="kv" id="cells"></div>
+    </div>
+
+    <div class="card">
+      <h2>Link de rádio e controle remoto</h2>
+      <div class="kv">
+        <span>Uplink</span><div class="bar"><i id="upBar"></i></div><span id="upTxt">--</span>
+        <span>Downlink</span><div class="bar"><i id="downBar"></i></div><span id="downTxt">--</span>
+      </div>
+      <div class="sticks" style="margin-top:12px">
+        <div><div class="pad"><i id="stickL"></i></div><div class="meta" style="text-align:center">Esq.</div></div>
+        <div><div class="pad"><i id="stickR"></i></div><div class="meta" style="text-align:center">Dir.</div></div>
+      </div>
+      <div class="meta" style="text-align:center;margin-top:6px">Chave: <b id="rcSwitch">--</b> · Gimbal <b id="gimbal">--</b></div>
+    </div>
+
+    <div class="card">
+      <h2>Obstáculos (distância mínima)</h2>
+      <div class="tiles" style="grid-template-columns:repeat(4,1fr)">
+        <div class="tile"><div class="k">Frente</div><div class="v" style="font-size:17px" id="obs_nose">--</div></div>
+        <div class="tile"><div class="k">Trás</div><div class="v" style="font-size:17px" id="obs_tail">--</div></div>
+        <div class="tile"><div class="k">Direita</div><div class="v" style="font-size:17px" id="obs_right">--</div></div>
+        <div class="tile"><div class="k">Esquerda</div><div class="v" style="font-size:17px" id="obs_left">--</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Alertas</h2>
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <div class="card charts">
+      <h2 id="chartsTitle">Últimos 5 min</h2>
+      <canvas id="chAlt" width="640" height="152"></canvas>
+      <canvas id="chSpd" width="640" height="152"></canvas>
+      <canvas id="chBat" width="640" height="152"></canvas>
+    </div>
+
+    <div class="card">
+      <details id="raw"><summary>Todos os campos</summary><table id="rawTbl"></table></details>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const css = getComputedStyle(document.documentElement);
+  const C = n => css.getPropertyValue(n).trim();
+  const isNum = v => typeof v === 'number' && isFinite(v);
+  const fmt = (v, d = 1) => isNum(v) ? v.toFixed(d) : '--';
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const validPos = (la, lo) => isNum(la) && isNum(lo) && Math.abs(la) <= 90 && Math.abs(lo) <= 180 && (Math.abs(la) > 1e-6 || Math.abs(lo) > 1e-6);
+
+  function haversine(la1, lo1, la2, lo2) {
+    const R = 6371000, r = Math.PI / 180;
+    const a = Math.sin((la2 - la1) * r / 2) ** 2 +
+              Math.cos(la1 * r) * Math.cos(la2 * r) * Math.sin((lo2 - lo1) * r / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  /* ---------- estado ---------- */
+  const S = { last: null, lastRx: 0, arrivals: [], dirty: false, sse: false, hist: [], lastHist: 0, gotFix: false };
+
+  /* ---------- mapa ---------- */
+  const map = L.map('map', { zoomControl: true }).setView([-15.78, -47.93], 4);
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' });
+  const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: 'Imagens &copy; Esri' });
+  osm.addTo(map);
+  L.control.layers({ 'Mapa (OpenStreetMap)': osm, 'Satélite (Esri)': sat }, null, { position: 'topright' }).addTo(map);
+  L.control.scale({ metric: true, imperial: false }).addTo(map);
+
+  const fullPath = L.polyline([], { color: '#8b93a1', weight: 3, opacity: .7, dashArray: '6 6' }).addTo(map);  // replay: voo inteiro
+  const trail = L.polyline([], { color: '#38bdf8', weight: 3, opacity: .9 }).addTo(map);
+  const droneIcon = L.divIcon({
+    className: '', iconSize: [36, 36], iconAnchor: [18, 18],
+    html: '<div class="drone"><svg width="36" height="36" viewBox="0 0 36 36"><path d="M18 3 L28 31 L18 25 L8 31 Z" fill="#38bdf8" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div>' });
+  const drone = L.marker([0, 0], { icon: droneIcon, zIndexOffset: 1000 });
+  const homeMk = L.marker([0, 0], { icon: L.divIcon({ className: '', iconSize: [22, 22], iconAnchor: [11, 11], html: '<div class="home-ic">H</div>' }) });
+  let onMap = false, homeOnMap = false;
+
+  fetch('/api/track').then(r => r.json()).then(t => trail.setLatLngs(t.map(p => [p[0], p[1]]))).catch(() => {});
+  $('center').onclick = () => { if (onMap) map.setView(drone.getLatLng(), Math.max(map.getZoom(), 17)); };
+  $('clear').onclick = () => trail.setLatLngs([]);
+  map.on('dragstart', () => { $('follow').checked = false; });
+
+  function updateMap(m) {
+    if (!validPos(m.lat, m.lon)) { $('coords').textContent = 'sem posição GPS'; return; }
+    const ll = [m.lat, m.lon];
+    if (!onMap) { drone.addTo(map); onMap = true; }
+    drone.setLatLng(ll);
+    const el = drone.getElement();
+    if (el && el.firstChild && isNum(m.yaw)) el.firstChild.style.transform = `rotate(${m.yaw}deg)`;
+    if (!R.on) {   // no replay a trilha é controlada por showRow()
+      const pts = trail.getLatLngs(), last = pts[pts.length - 1];
+      if (!last || Math.abs(last.lat - m.lat) > 5e-6 || Math.abs(last.lng - m.lon) > 5e-6) trail.addLatLng(ll);
+    }
+    $('coords').textContent = `${m.lat.toFixed(6)}, ${m.lon.toFixed(6)}`;
+    if (validPos(m.home_lat, m.home_lon) && m.home_set) {
+      homeMk.setLatLng([m.home_lat, m.home_lon]);
+      if (!homeOnMap) { homeMk.addTo(map); homeOnMap = true; }
+    }
+    if (!S.gotFix) { S.gotFix = true; map.setView(ll, 17); }
+    else if ($('follow').checked && !map.getBounds().pad(-0.3).contains(ll)) map.panTo(ll);
+  }
+
+  /* ---------- instrumentos (canvas) ---------- */
+  function setup(cv, size) {
+    cv.width = size * 2; cv.height = size * 2; cv.style.width = size + 'px'; cv.style.height = size + 'px';
+    const c = cv.getContext('2d'); c.setTransform(2, 0, 0, 2, 0, 0); return c;
+  }
+  const hz = setup($('horizon'), 170), cp = setup($('compass'), 170);
+
+  function drawHorizon(pitch, roll) {
+    const c = hz, w = 170, r = 80;
+    c.clearRect(0, 0, w, w); c.save(); c.translate(w / 2, w / 2);
+    c.beginPath(); c.arc(0, 0, r, 0, 7); c.clip();
+    c.rotate(-(roll || 0) * Math.PI / 180);
+    const off = clamp(pitch || 0, -60, 60) * (r / 40);
+    c.fillStyle = C('--sky'); c.fillRect(-w, -w * 2 + off, w * 2, w * 2);
+    c.fillStyle = C('--ground'); c.fillRect(-w, off, w * 2, w * 2);
+    c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.moveTo(-w, off); c.lineTo(w, off); c.stroke();
+    c.lineWidth = 1; c.fillStyle = '#fff'; c.font = '10px system-ui'; c.textAlign = 'center';
+    for (const p of [-20, -10, 10, 20]) {
+      const y = off - p * (r / 40); c.beginPath(); c.moveTo(-18, y); c.lineTo(18, y); c.stroke();
+      c.fillText(Math.abs(p), 28, y + 3);
+    }
+    c.restore();
+    c.strokeStyle = C('--line'); c.lineWidth = 3; c.beginPath(); c.arc(w / 2, w / 2, r, 0, 7); c.stroke();
+    c.strokeStyle = '#fbbf24'; c.lineWidth = 3; c.beginPath();
+    c.moveTo(w / 2 - 34, w / 2); c.lineTo(w / 2 - 10, w / 2); c.lineTo(w / 2, w / 2 + 8); c.lineTo(w / 2 + 10, w / 2); c.lineTo(w / 2 + 34, w / 2); c.stroke();
+  }
+
+  function drawCompass(yaw) {
+    const c = cp, w = 170, r = 76; c.clearRect(0, 0, w, w); c.save(); c.translate(w / 2, w / 2);
+    c.strokeStyle = C('--line'); c.lineWidth = 3; c.beginPath(); c.arc(0, 0, r, 0, 7); c.stroke();
+    c.rotate(-(yaw || 0) * Math.PI / 180);
+    c.fillStyle = C('--text'); c.font = '600 13px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (let a = 0; a < 360; a += 30) {
+      c.save(); c.rotate(a * Math.PI / 180);
+      c.strokeStyle = C('--muted'); c.lineWidth = a % 90 === 0 ? 2 : 1;
+      c.beginPath(); c.moveTo(0, -r); c.lineTo(0, -r + (a % 90 === 0 ? 9 : 5)); c.stroke();
+      const lbl = { 0: 'N', 90: 'L', 180: 'S', 270: 'O' }[a];
+      if (lbl) { c.fillStyle = a === 0 ? C('--bad') : C('--text'); c.fillText(lbl, 0, -r + 21); }
+      c.restore();
+    }
+    c.restore();
+    c.fillStyle = C('--accent'); c.beginPath(); c.moveTo(w / 2, w / 2 - 30); c.lineTo(w / 2 + 12, w / 2 + 20);
+    c.lineTo(w / 2, w / 2 + 12); c.lineTo(w / 2 - 12, w / 2 + 20); c.closePath(); c.fill();
+    c.fillStyle = C('--warn'); c.beginPath(); c.moveTo(w / 2, 6); c.lineTo(w / 2 - 6, -2 + 2); c.lineTo(w / 2 + 6, 0); c.fill();
+  }
+
+  function chart(id, key, color, label, unit, curVal) {
+    const cv = $(id), c = cv.getContext('2d'), W = cv.width, H = cv.height;
+    c.clearRect(0, 0, W, H);
+    const d = S.hist.map(h => h[key]).filter(isNum);
+    c.fillStyle = C('--muted'); c.font = '22px system-ui';
+    c.fillText(label, 6, 22);
+    if (d.length < 2) return;
+    let lo = Math.min(...d), hi = Math.max(...d); if (hi - lo < 1) { hi += .5; lo -= .5; }
+    const pad = 30, n = S.hist.length;
+    c.strokeStyle = color; c.lineWidth = 3; c.beginPath();
+    S.hist.forEach((h, i) => {
+      if (!isNum(h[key])) return;
+      const x = 6 + i * (W - 12) / Math.max(1, n - 1), y = H - 8 - (h[key] - lo) / (hi - lo) * (H - pad - 8);
+      i === 0 ? c.moveTo(x, y) : c.lineTo(x, y);
+    });
+    c.stroke();
+    if (isNum(S.cursor)) {   // replay: marcador da posição atual
+      const cx = 6 + S.cursor * (W - 12);
+      c.strokeStyle = C('--text'); c.lineWidth = 2; c.beginPath(); c.moveTo(cx, 0); c.lineTo(cx, H); c.stroke();
+    }
+    c.fillStyle = C('--text'); c.textAlign = 'right';
+    c.fillText(`${fmt(isNum(curVal) ? curVal : d[d.length - 1], 1)} ${unit}   (mín ${fmt(lo, 0)} · máx ${fmt(hi, 0)})`, W - 6, 22); c.textAlign = 'left';
+  }
+
+  /* ---------- painel ---------- */
+  const CHIPS = [
+    ['bat_serious_warn', 'Bateria crítica', 'bad'], ['bat_low_warn', 'Bateria baixa', 'on'],
+    ['imu_preheating', 'IMU aquecendo', 'on'], ['compass_error', 'Erro de bússola', 'bad'],
+    ['max_height_reached', 'Altura máx.', 'on'], ['max_radius_reached', 'Raio máx.', 'on'],
+    ['going_home', 'Retornando à base', 'on'], ['is_flying', 'Voando', 'good'], ['motors_on', 'Motores ligados', 'good'],
+  ];
+  $('chips').innerHTML = CHIPS.map(c => `<span class="chip" data-k="${c[0]}">${c[1]}</span>`).join('') +
+                         '<span class="chip" id="wind">Vento: --</span>';
+  const bar = (id, pct) => { const b = $(id); b.style.width = clamp(pct, 0, 100) + '%';
+    b.style.background = pct > 40 ? C('--ok') : pct > 20 ? C('--warn') : C('--bad'); };
+  const dist = v => isNum(v) ? (v < 10 ? v.toFixed(1) : v.toFixed(0)) + ' m' : '--';
+  const mmss = s => isNum(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '--';
+
+  function render() {
+    const m = S.last; if (!m) return;
+    $('alt').textContent = fmt(m.alt, 1);
+    $('altSub').textContent = isNum(m.ultrasonic_m) && m.ultrasonic_used ? `ultrassom ${fmt(m.ultrasonic_m, 1)} m` : ' ';
+    $('spd').textContent = fmt(m.speed_h, 1);
+    $('spdSub').textContent = isNum(m.speed_h) ? `${(m.speed_h * 3.6).toFixed(0)} km/h` : ' ';
+    const vz = isNum(m.vz) ? -m.vz : null;   // NED: vz>0 = descendo
+    $('vz').textContent = vz === null ? '--' : (vz > 0 ? '+' : '') + vz.toFixed(1);
+    $('vzSub').textContent = vz === null ? ' ' : (vz > .3 ? 'subindo' : vz < -.3 ? 'descendo' : 'estável');
+    let d = null; if (m.home_set && validPos(m.lat, m.lon) && validPos(m.home_lat, m.home_lon)) d = haversine(m.lat, m.lon, m.home_lat, m.home_lon);
+    $('dist').textContent = d === null ? '--' : d < 100 ? d.toFixed(1) : d.toFixed(0);
+    $('distSub').textContent = isNum(m.time_to_home_s) ? `volta em ${mmss(m.time_to_home_s)}` : ' ';
+    $('batTile').textContent = fmt(m.bat_pct, 0);
+    $('batSub').textContent = isNum(m.bat_v_mv) ? `${(m.bat_v_mv / 1000).toFixed(2)} V` : ' ';
+    $('sats').textContent = isNum(m.sats) ? m.sats : '--';
+    $('gps').textContent = m.gps_level ? `GPS ${String(m.gps_level).replace('LEVEL_', 'nível ')}` : ' ';
+    $('ftime').textContent = mmss(m.flight_time_s);
+    $('fremain').textContent = isNum(m.remaining_flight_s) ? `restam ~${mmss(m.remaining_flight_s)}` : ' ';
+    $('mode').textContent = m.flight_mode || '--';
+    $('flying').textContent = m.is_flying ? 'em voo' : m.motors_on ? 'motores ligados' : 'em solo';
+
+    drawHorizon(m.pitch, m.roll); drawCompass(m.yaw);
+    $('pitchTxt').textContent = fmt(m.pitch, 1); $('rollTxt').textContent = fmt(m.roll, 1); $('yawTxt').textContent = fmt(m.yaw, 0);
+
+    if (isNum(m.bat_pct)) bar('batBar', m.bat_pct);
+    const power = isNum(m.bat_v_mv) && isNum(m.bat_a_ma) ? Math.abs(m.bat_v_mv * m.bat_a_ma) / 1e6 : null;
+    $('batKv').innerHTML =
+      `<span>Tensão</span><span></span><span>${fmt(m.bat_v_mv / 1000, 2)} V</span>` +
+      `<span>Corrente</span><span></span><span>${fmt(m.bat_a_ma / 1000, 2)} A${power !== null ? ` · ${power.toFixed(0)} W` : ''}</span>` +
+      `<span>Temperatura</span><span></span><span>${fmt(m.bat_temp_c, 0)} °C</span>` +
+      `<span>Carga</span><span></span><span>${fmt(m.bat_remaining_mah, 0)} / ${fmt(m.bat_full_mah, 0)} mAh</span>` +
+      `<span>Ciclos · vida útil</span><span></span><span>${fmt(m.bat_discharges, 0)} · ${fmt(m.bat_life_pct, 0)}%</span>`;
+    let cells = '';
+    for (let i = 1; i <= 4; i++) {
+      const v = m['cell' + i + '_mv']; if (!isNum(v)) continue;
+      cells += `<span>Célula ${i}</span><div class="bar"><i style="width:${clamp((v - 3300) / 10.5, 0, 100)}%;background:${C('--accent')}"></i></div><span>${(v / 1000).toFixed(3)} V</span>`;
+    }
+    if (isNum(m.cell_delta_mv)) cells += `<span>Desbalanço</span><span></span><span style="color:${m.cell_delta_mv > 100 ? C('--bad') : C('--text')}">${m.cell_delta_mv} mV</span>`;
+    $('cells').innerHTML = cells;
+
+    bar('upBar', m.uplink_pct || 0); $('upTxt').textContent = fmt(m.uplink_pct, 0) + '%';
+    bar('downBar', m.downlink_pct || 0); $('downTxt').textContent = fmt(m.downlink_pct, 0) + '%';
+    const stick = (id, x, y) => { const e = $(id); if (!isNum(x) || !isNum(y)) return;
+      e.style.left = 50 + clamp(x, -660, 660) / 660 * 46 + '%'; e.style.top = 50 - clamp(y, -660, 660) / 660 * 46 + '%'; };
+    stick('stickL', m.rc_lx, m.rc_ly); stick('stickR', m.rc_rx, m.rc_ry);
+    $('rcSwitch').textContent = String(m.rc_flight_switch || '--').replace('POSITION_', '');
+    $('gimbal').textContent = isNum(m.gimbal_pitch) ? `${m.gimbal_pitch.toFixed(0)}°` : '--';
+
+    for (const k of ['nose', 'tail', 'right', 'left']) {
+      const v = m['obs_' + k], e = $('obs_' + k); e.textContent = dist(v);
+      e.style.color = isNum(v) ? (v < 3 ? C('--bad') : v < 8 ? C('--warn') : C('--text')) : C('--muted');
+    }
+    document.querySelectorAll('.chip[data-k]').forEach(e => {
+      const c = CHIPS.find(x => x[0] === e.dataset.k); e.className = 'chip' + (m[c[0]] === true ? ' ' + c[2] : '');
+    });
+    const w = String(m.wind_warning || ''); const wl = $('wind');
+    wl.textContent = 'Vento: ' + (w.replace('LEVEL_', 'nível ') || '--');
+    wl.className = 'chip' + (/LEVEL_[12]/.test(w) ? (w.endsWith('2') ? ' bad' : ' on') : '');
+
+    updateMap(m);
+    if (m.ts) $('clock').textContent = new Date(m.ts).toLocaleTimeString('pt-BR');
+    if ($('raw').open) $('rawTbl').innerHTML = Object.keys(m).sort().map(k => `<tr><td>${k}</td><td>${m[k] === null ? '—' : m[k]}</td></tr>`).join('');
+
+    const now = Date.now();
+    if (R.on) drawCharts();
+    else if (now - S.lastHist >= 1000) {
+      S.lastHist = now; S.hist.push({ alt: m.alt, spd: m.speed_h, bat: m.bat_pct }); if (S.hist.length > 300) S.hist.shift();
+      drawCharts();
+    }
+  }
+
+  function drawCharts() {
+    const m = R.on ? S.last : null;   // no replay o título mostra o valor no instante atual
+    chart('chAlt', 'alt', C('--accent'), 'Altitude', 'm', m && m.alt);
+    chart('chSpd', 'spd', C('--ok'), 'Velocidade horiz.', 'm/s', m && m.speed_h);
+    chart('chBat', 'bat', C('--warn'), 'Bateria', '%', m && m.bat_pct);
+  }
+
+  /* ---------- replay de logs (.csv / .jsonl) ---------- */
+  const R = { on: false, rows: [], t0: 0, dur: 1, tcur: 0, idx: -1, playing: false, speed: 1, frame: 0,
+              path: [], pathRow: [], k: 0, name: '' };
+  S.cursor = null;
+
+  function parseCell(v) {
+    if (v === undefined || v === '') return null;
+    if (v === 'True' || v === 'true') return true;
+    if (v === 'False' || v === 'false') return false;
+    return /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(v) ? Number(v) : v;
+  }
+  function splitCsv(line) {
+    if (line.indexOf('"') < 0) return line.split(',');
+    const out = []; let cur = '', q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (q) { if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === ',') { out.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    out.push(cur); return out;
+  }
+  function parseLog(text, name) {
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (/\.jsonl?$/i.test(name)) return lines.map(l => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
+    if (!lines.length) return [];
+    const head = splitCsv(lines[0]);
+    return lines.slice(1).map(l => {
+      const cells = splitCsv(l), o = {};
+      head.forEach((h, i) => { const v = parseCell(cells[i]); if (v !== null) o[h] = v; });
+      return o;
+    });
+  }
+
+  const bsearch = ts => {   // último índice com rows[i].ts <= ts
+    let lo = 0, hi = R.rows.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (R.rows[mid].ts <= ts) lo = mid; else hi = mid - 1; }
+    return lo;
+  };
+  const upper = (arr, v) => {   // quantos elementos de arr são <= v
+    let lo = 0, hi = arr.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] <= v) lo = mid + 1; else hi = mid; }
+    return lo;
+  };
+
+  function loadRows(rows, name) {
+    rows = rows.filter(r => isNum(r.ts)).sort((a, b) => a.ts - b.ts);
+    if (rows.length < 2) { alert('Nenhum registro de telemetria válido (coluna "ts") em ' + name); return; }
+    play(false);
+    R.rows = rows; R.t0 = rows[0].ts; R.dur = Math.max(1, rows[rows.length - 1].ts - R.t0);
+    R.name = name; R.idx = -1; R.k = 0; R.path = []; R.pathRow = [];
+    rows.forEach((r, i) => {
+      if (!validPos(r.lat, r.lon)) return;
+      const l = R.path[R.path.length - 1];
+      if (!l || Math.abs(l[0] - r.lat) > 5e-6 || Math.abs(l[1] - r.lon) > 5e-6) { R.path.push([r.lat, r.lon]); R.pathRow.push(i); }
+    });
+    fullPath.setLatLngs(R.path); trail.setLatLngs([]);
+    if (R.path.length > 1) map.fitBounds(fullPath.getBounds(), { padding: [50, 50], maxZoom: 18 });
+    S.gotFix = true;
+    const M = Math.min(400, rows.length);   // gráficos: voo inteiro, amostrado por tempo
+    S.hist = [];
+    for (let i = 0; i < M; i++) {
+      const r = rows[bsearch(R.t0 + R.dur * i / Math.max(1, M - 1))];
+      S.hist.push({ alt: r.alt, spd: r.speed_h, bat: r.bat_pct });
+    }
+    $('chartsTitle').textContent = 'Voo completo — clique para navegar';
+    $('seek').disabled = false;
+    seek(0);
+  }
+
+  function seek(ms) {
+    if (!R.rows.length) return;
+    R.tcur = clamp(ms, 0, R.dur);
+    $('seek').value = Math.round(R.tcur / R.dur * 10000);
+    $('tcur').textContent = `${mmss(R.tcur / 1000)} / ${mmss(R.dur / 1000)}`;
+    S.cursor = R.tcur / R.dur;
+    const i = bsearch(R.t0 + R.tcur);
+    if (i === R.idx) { drawCharts(); return; }
+    R.idx = i; S.last = R.rows[i];
+    const k = upper(R.pathRow, i);   // pontos da trilha já percorridos
+    if (k < R.k || k - R.k > 60) trail.setLatLngs(R.path.slice(0, k));
+    else for (let j = R.k; j < k; j++) trail.addLatLng(R.path[j]);
+    R.k = k;
+    render();
+  }
+
+  function play(on) {
+    R.playing = on && R.rows.length > 0;
+    $('play').textContent = R.playing ? '⏸' : '▶';
+    if (R.playing) { if (R.tcur >= R.dur) seek(0); R.frame = performance.now(); requestAnimationFrame(tick); }
+  }
+  function tick(now) {
+    if (!R.playing) return;
+    const next = R.tcur + (now - R.frame) * R.speed; R.frame = now;
+    if (next >= R.dur) { seek(R.dur); play(false); return; }
+    seek(next); requestAnimationFrame(tick);
+  }
+
+  async function refreshLogs() {
+    const sel = $('logSel'); sel.innerHTML = '';
+    sel.appendChild(new Option('— logs salvos no PC —', ''));
+    try {
+      const list = await (await fetch('/api/logs')).json();
+      list.forEach(f => sel.appendChild(new Option(`${f.name}  (${(f.size / 1024).toFixed(0)} KB)`, f.name)));
+    } catch (_) {}
+  }
+  async function openServerLog(name) {
+    if (!name) return;
+    $('tcur').textContent = 'Carregando…';
+    try {
+      const r = await fetch('/api/log?name=' + encodeURIComponent(name));
+      if (!r.ok) throw new Error(r.status);
+      loadRows(parseLog(await r.text(), name), name);
+    } catch (e) { alert('Não foi possível abrir ' + name); }
+  }
+  function openLocalFile(file) {
+    if (!file) return;
+    const fr = new FileReader();
+    fr.onload = () => loadRows(parseLog(String(fr.result), file.name), file.name);
+    fr.readAsText(file);
+  }
+
+  function setMode(replay) {
+    play(false); R.on = replay;
+    $('replaybar').hidden = !replay;
+    document.body.classList.toggle('replay-on', replay);
+    $('modeLive').classList.toggle('active', !replay); $('modeReplay').classList.toggle('active', replay);
+    if (replay) { refreshLogs(); }
+    else {
+      R.rows = []; S.cursor = null; S.hist = []; S.lastHist = 0; S.last = null;
+      fullPath.setLatLngs([]); trail.setLatLngs([]);
+      fetch('/api/track').then(r => r.json()).then(t => trail.setLatLngs(t.map(q => [q[0], q[1]]))).catch(() => {});
+      $('chartsTitle').textContent = 'Últimos 5 min';
+    }
+  }
+
+  $('modeLive').onclick = () => setMode(false);
+  $('modeReplay').onclick = () => setMode(true);
+  $('logSel').onchange = e => openServerLog(e.target.value);
+  $('openBtn').onclick = () => $('fileIn').click();
+  $('fileIn').onchange = e => { openLocalFile(e.target.files[0]); e.target.value = ''; };
+  $('play').onclick = () => play(!R.playing);
+  $('stepBack').onclick = () => seek(R.tcur - 5000);
+  $('stepFwd').onclick = () => seek(R.tcur + 5000);
+  $('seek').oninput = e => seek(e.target.value / 10000 * R.dur);
+  $('speed').onchange = e => { R.speed = +e.target.value; };
+  ['chAlt', 'chSpd', 'chBat'].forEach(id => $(id).addEventListener('click', e => {
+    if (!R.on || !R.rows.length) return;
+    const b = e.currentTarget.getBoundingClientRect(); seek(clamp((e.clientX - b.left) / b.width, 0, 1) * R.dur);
+  }));
+  // tira o foco dos controles após o uso, para os atalhos (espaço, ←, →) continuarem valendo
+  document.querySelectorAll('#replaybar button').forEach(el => el.addEventListener('click', () => el.blur()));
+  document.querySelectorAll('#replaybar select, #replaybar input[type=range]').forEach(el => el.addEventListener('change', () => el.blur()));
+  addEventListener('keydown', e => {
+    if (!R.on || !R.rows.length || /^(INPUT|SELECT|BUTTON|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    if (e.key === ' ') { e.preventDefault(); play(!R.playing); }
+    else if (e.key === 'ArrowLeft') seek(R.tcur - (e.shiftKey ? 30000 : 5000));
+    else if (e.key === 'ArrowRight') seek(R.tcur + (e.shiftKey ? 30000 : 5000));
+  });
+  addEventListener('dragover', e => e.preventDefault());
+  addEventListener('drop', e => {   // arrastar um .csv/.jsonl para a página
+    e.preventDefault(); const f = e.dataTransfer.files[0]; if (!f) return;
+    if (!R.on) setMode(true);
+    openLocalFile(f);
+  });
+
+  /* ---------- conexão ---------- */
+  function setStatus(cls, txt) { $('status').className = 'pill ' + cls; $('statusTxt').textContent = txt; }
+  function onMsg(m) {
+    if (R.on) return;   // no replay, a telemetria ao vivo é ignorada
+    S.last = m; S.lastRx = Date.now(); S.arrivals.push(m.ts); if (S.arrivals.length > 30) S.arrivals.shift();
+    $('cnt').textContent = m._n; $('lost').textContent = m._lost;
+    if (!S.dirty) { S.dirty = true; requestAnimationFrame(() => { S.dirty = false; render(); }); }
+  }
+  function connect() {
+    const es = new EventSource('/events');
+    es.onopen = () => { S.sse = true; };
+    es.onmessage = e => { try { onMsg(JSON.parse(e.data)); } catch (_) {} };
+    es.onerror = () => { S.sse = false; };   // EventSource reconecta sozinho
+  }
+  setInterval(() => {
+    if (R.on) {
+      setStatus('replay', R.rows.length ? `Replay · ${R.name}` : 'Replay — escolha um arquivo');
+      $('rate').textContent = '--'; return;
+    }
+    const age = (Date.now() - S.lastRx) / 1000;
+    if (!S.sse) setStatus('off', 'Servidor offline');
+    else if (!S.lastRx) setStatus('stale', 'Aguardando telemetria…');
+    else if (age < 3) setStatus('live', 'Ao vivo');
+    else setStatus('stale', `Sem dados há ${Math.floor(age)} s`);
+    const a = S.arrivals;
+    // taxa = pacotes recebidos / intervalo entre os horários dos pacotes (imune a rajadas do navegador)
+    const span = a.length > 2 ? a[a.length - 1] - a[0] : 0;
+    $('rate').textContent = age < 3 && span > 0 ? (1000 * (a.length - 1) / span).toFixed(1) : '--';
+  }, 500);
+  connect();
+  drawHorizon(0, 0); drawCompass(0);
+})();
+</script>
+</body>
+</html>

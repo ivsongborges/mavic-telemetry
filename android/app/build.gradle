@@ -1,0 +1,67 @@
+plugins {
+    id 'com.android.application'
+}
+
+// App Key do DJI Developer Center. Defina em android/local.properties:
+//   DJI_APP_KEY=xxxxxxxxxxxxxxxxxxxxxxxx
+def localProps = new Properties()
+def localFile = rootProject.file('local.properties')
+if (localFile.exists()) {
+    localFile.withInputStream { localProps.load(it) }
+}
+def djiAppKey = localProps.getProperty('DJI_APP_KEY', '')
+
+android {
+    namespace 'com.dji.mavictelemetry'
+    compileSdkVersion 31
+
+    defaultConfig {
+        // Deve ser IDÊNTICO ao package name cadastrado no App Key.
+        applicationId "com.dji.mavictelemetry"
+        minSdkVersion 21
+        targetSdkVersion 30
+        versionCode 1
+        versionName "1.0"
+        multiDexEnabled true
+        manifestPlaceholders = [DJI_APP_KEY: djiAppKey]
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+        doNotStrip "*/*/libdjivideo.so"
+        doNotStrip "*/*/libSDKRelativeJNI.so"
+        doNotStrip "*/*/libFlyForbid.so"
+        doNotStrip "*/*/libduml_vision_bokeh.so"
+        doNotStrip "*/*/libyuv2.so"
+        doNotStrip "*/*/libGroudStation.so"
+        doNotStrip "*/*/libFRCorkscrew.so"
+        doNotStrip "*/*/libUpgradeVerify.so"
+        doNotStrip "*/*/libFR.so"
+        resources {
+            excludes += ['META-INF/rxjava.properties']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.4.2'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.multidex:multidex:2.0.1'
+
+    // DJI Mobile SDK V4 (suporta Mavic Pro)
+    implementation('com.dji:dji-sdk:4.16.4', {
+        exclude module: 'library-anti-distortion'
+        exclude module: 'fly-safe-database'
+    })
+    compileOnly 'com.dji:dji-sdk-provided:4.16.4'
+}
